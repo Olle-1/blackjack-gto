@@ -16,11 +16,11 @@ class BlackjackTable:
         self.canvas = tk.Canvas(
             parent, 
             width=WINDOW_WIDTH, 
-            height=550, 
+            height=400, 
             bg=TABLE_COLOR,
             highlightthickness=0
         )
-        self.canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.canvas.pack(fill=tk.X, expand=False, padx=10, pady=5)
         
         # Card image cache
         self.card_images = {}
@@ -37,7 +37,7 @@ class BlackjackTable:
         """Draw the blackjack table felt"""
         # Main table semicircle
         self.canvas.create_arc(
-            200, 100, 1000, 700,
+            200, 50, 1000, 450,
             start=0, extent=180,
             fill=TABLE_FELT_COLOR,
             outline=TABLE_OUTLINE_COLOR,
@@ -47,7 +47,7 @@ class BlackjackTable:
         
         # Betting circle
         self.canvas.create_oval(
-            575, 400, 625, 450,
+            575, 300, 625, 350,
             outline=TABLE_OUTLINE_COLOR,
             width=2,
             tags="betting_circle"
@@ -63,7 +63,7 @@ class BlackjackTable:
         )
         
         self.canvas.create_text(
-            600, 500,
+            600, 370,
             text="PLAYER",
             font=SCORE_FONT,
             fill=TABLE_OUTLINE_COLOR,
@@ -87,7 +87,7 @@ class BlackjackTable:
         pass
     
     def display_card(self, card_text: str, x: int, y: int, 
-                    face_down: bool = False) -> int:
+                    face_down: bool = False, card_type: str = "card") -> int:
         """Display a card on the table"""
         # Simple text-based card display for now
         if face_down:
@@ -96,7 +96,7 @@ class BlackjackTable:
                 fill='darkred',
                 outline='white',
                 width=2,
-                tags="card"
+                tags=card_type
             )
         else:
             # Card background
@@ -105,7 +105,7 @@ class BlackjackTable:
                 fill='white',
                 outline='black',
                 width=2,
-                tags="card"
+                tags=card_type
             )
             # Card text
             self.canvas.create_text(
@@ -113,7 +113,7 @@ class BlackjackTable:
                 text=card_text,
                 font=('Arial', 24, 'bold'),
                 fill='black' if card_text[1] in 'hd' else 'red',
-                tags="card"
+                tags=card_type
             )
         
         return card_id
@@ -128,26 +128,23 @@ class BlackjackTable:
     
     def update_dealer_cards(self, cards: List[Tuple[str, bool]]):
         """Update dealer's card display"""
-        # Clear existing dealer cards
-        for card_id in self.dealer_card_ids:
-            self.canvas.delete(card_id)
+        # Clear existing dealer cards using tag
+        self.canvas.delete("dealer_card")
         self.dealer_card_ids.clear()
         
         # Display new cards
-        x_start = 600 - (len(cards) * (CARD_WIDTH + CARD_SPACING)) // 2
+        total_width = len(cards) * CARD_WIDTH + (len(cards) - 1) * CARD_SPACING
+        x_start = 400 - total_width // 2
         for i, (card_text, face_down) in enumerate(cards):
             x = x_start + i * (CARD_WIDTH + CARD_SPACING)
-            card_id = self.display_card(card_text, x, DEALER_CARD_Y, face_down)
+            card_id = self.display_card(card_text, x, DEALER_CARD_Y, face_down, "dealer_card")
             self.dealer_card_ids.append(card_id)
     
     def update_player_cards(self, hands_cards: List[List[str]], active_hand_index: int = 0):
         """Update multiple player hands display"""
-        # Clear existing player cards and highlights
-        for hand_cards in self.player_card_ids:
-            for card_id in hand_cards:
-                self.canvas.delete(card_id)
-        for highlight_id in self.hand_highlights:
-            self.canvas.delete(highlight_id)
+        # Clear existing player cards and highlights using tags
+        self.canvas.delete("player_card")
+        self.canvas.delete("hand_highlight")
         self.player_card_ids.clear()
         self.hand_highlights.clear()
         
@@ -159,15 +156,15 @@ class BlackjackTable:
         # Calculate positioning for multiple hands
         if num_hands == 1:
             # Single hand - center position
-            hand_positions = [600]
+            hand_positions = [700]
         elif num_hands == 2:
             # Two hands - side by side
-            hand_positions = [450, 750]
+            hand_positions = [550, 850]
         elif num_hands == 3:
             # Three hands
-            hand_positions = [350, 600, 850]
+            hand_positions = [450, 700, 950]
         else:  # 4 hands
-            hand_positions = [300, 500, 700, 900]
+            hand_positions = [400, 600, 800, 1000]
         
         # Display each hand
         for hand_idx, (cards, x_center) in enumerate(zip(hands_cards, hand_positions)):
@@ -198,7 +195,7 @@ class BlackjackTable:
             # Display cards for this hand
             for i, card_text in enumerate(cards):
                 x = x_start + i * (CARD_WIDTH + CARD_SPACING)
-                card_id = self.display_card(card_text, x, PLAYER_CARD_Y)
+                card_id = self.display_card(card_text, x, PLAYER_CARD_Y, False, "player_card")
                 hand_card_ids.append(card_id)
             
             self.player_card_ids.append(hand_card_ids)

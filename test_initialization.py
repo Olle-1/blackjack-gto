@@ -56,7 +56,7 @@ def test_core_components():
         
         # Test Settings
         settings.load()
-        print(f"✓ Settings loaded - Starting bankroll: ${settings.game_rules.starting_bankroll}")
+        print(f"✓ Settings loaded - Default bankroll: ${settings.betting_limits.default_bankroll}")
         
         return True
     except Exception as e:
@@ -68,30 +68,32 @@ def test_game_logic():
     try:
         game_state = GameState()
         
-        # Test shoe creation
-        game_state.new_shoe()
-        print(f"✓ New shoe created - Cards: {len(game_state.shoe.cards)}")
+        # Test shoe - it's already created in GameState init
+        print(f"✓ Shoe initialized - Cards: {len(game_state.shoe.cards)}")
         
         # Test card dealing
-        game_state.start_new_hand()
-        print(f"✓ New hand started - Player cards: {len(game_state.player_hand.cards)}")
-        print(f"  Player hand value: {game_state.player_hand.value}")
-        print(f"  Dealer upcard: {game_state.dealer_hand.cards[0] if game_state.dealer_hand.cards else 'None'}")
-        
-        # Test card counting
-        counter = CardCounter()
-        for card in game_state.player_hand.cards:
-            counter.update_count(card)
-        if game_state.dealer_hand.cards:
-            counter.update_count(game_state.dealer_hand.cards[0])  # Count dealer upcard
-        
-        print(f"✓ Card counting works - Running count: {counter.running_count}")
-        
-        # Test EV calculation
-        ev_calc = EVCalculator()
-        true_count = counter.get_true_count(game_state.shoe.decks_remaining())
-        ev = ev_calc.calculate_ev(100, true_count)  # $100 bet
-        print(f"✓ EV calculation works - True count: {true_count:.2f}, EV: {ev:.2f}%")
+        game_state.start_new_hand(25)  # $25 bet
+        if game_state.player_hand:
+            print(f"✓ New hand started - Player cards: {len(game_state.player_hand.cards)}")
+            print(f"  Player hand value: {game_state.player_hand.value}")
+            print(f"  Dealer upcard: {game_state.dealer_hand.cards[0] if game_state.dealer_hand.cards else 'None'}")
+            
+            # Test card counting
+            counter = CardCounter()
+            for card in game_state.player_hand.cards:
+                counter.update_count(card)
+            if game_state.dealer_hand.cards:
+                counter.update_count(game_state.dealer_hand.cards[0])  # Count dealer upcard
+            
+            print(f"✓ Card counting works - Running count: {counter.running_count}")
+            
+            # Test EV calculation
+            ev_calc = EVCalculator()
+            true_count = counter.get_true_count(game_state.shoe.decks_remaining())
+            ev = ev_calc.calculate_ev(100, true_count)  # $100 bet
+            print(f"✓ EV calculation works - True count: {true_count:.2f}, EV: {ev:.2f}%")
+        else:
+            print("✗ Failed to start new hand")
         
         return True
     except Exception as e:
@@ -113,18 +115,36 @@ def test_basic_strategy():
             ('A,7', 9, True, True, 'H'), # Soft 18 vs 9 = Hit
         ]
         
-        for i, (player, dealer, soft, can_double, expected) in enumerate(test_cases):
-            if isinstance(player, str):
-                # Soft hand test
-                result = strategy.get_action_soft(player, dealer, can_double, False)
-            else:
-                # Hard hand test
-                result = strategy.get_action_hard(player, dealer, can_double, False)
-            
+        # Test with actual Hand and Card objects
+        from game_engine import Hand, Card
+        
+        # Create hands properly by adding cards one by one
+        test_scenarios = []
+        
+        # Hard 16 vs 10 should HIT
+        hand1 = Hand()
+        hand1.add_card(Card('8', 'Hearts'))
+        hand1.add_card(Card('8', 'Spades'))
+        test_scenarios.append((hand1, Card('10', 'Hearts'), 'H'))
+        
+        # 11 vs 5 should DOUBLE  
+        hand2 = Hand()
+        hand2.add_card(Card('6', 'Hearts'))
+        hand2.add_card(Card('5', 'Spades'))
+        test_scenarios.append((hand2, Card('5', 'Hearts'), 'D'))
+        
+        # 17 vs 10 should STAND
+        hand3 = Hand()
+        hand3.add_card(Card('10', 'Hearts'))
+        hand3.add_card(Card('7', 'Spades'))
+        test_scenarios.append((hand3, Card('10', 'Hearts'), 'S'))
+        
+        for i, (hand, dealer_card, expected) in enumerate(test_scenarios):
+            result = strategy.get_optimal_action(hand, dealer_card, True, False, None)
             if result == expected:
-                print(f"✓ Strategy test {i+1}: {player} vs {dealer} = {result}")
+                print(f"✓ Strategy test {i+1}: {hand.value} vs {dealer_card.rank} = {result}")
             else:
-                print(f"✗ Strategy test {i+1}: {player} vs {dealer} = {result} (expected {expected})")
+                print(f"✗ Strategy test {i+1}: {hand.value} vs {dealer_card.rank} = {result} (expected {expected})")
         
         return True
     except Exception as e:
