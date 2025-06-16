@@ -55,10 +55,11 @@ class AutoPlayer:
             self.play_thread.join(timeout=1.0)
             
     def get_optimal_action(self, player_hand: Hand, dealer_upcard: Card, 
-                          can_double: bool = True, can_split: bool = True) -> str:
+                          can_double: bool = True, can_split: bool = True,
+                          game_state=None) -> str:
         """Get optimal action using basic strategy"""
         return self.strategy.get_optimal_action(
-            player_hand, dealer_upcard, can_double, can_split
+            player_hand, dealer_upcard, can_double, can_split, game_state
         )
         
     def _auto_play_loop(self):

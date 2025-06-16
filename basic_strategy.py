@@ -44,6 +44,7 @@ class BasicStrategy:
         # Columns: Dealer upcard (2-10, A)
         self.soft_table = {
             # Soft    2    3    4    5    6    7    8    9   10    A
+            12:     ['H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H', 'H'],  # A,A (when can't split)
             13:     ['H', 'H', 'H', 'D', 'D', 'H', 'H', 'H', 'H', 'H'],  # A,2
             14:     ['H', 'H', 'H', 'D', 'D', 'H', 'H', 'H', 'H', 'H'],  # A,3
             15:     ['H', 'H', 'D', 'D', 'D', 'H', 'H', 'H', 'H', 'H'],  # A,4
@@ -82,7 +83,8 @@ class BasicStrategy:
         }
     
     def get_optimal_action(self, player_hand: Hand, dealer_upcard: Card, 
-                          can_double: bool = True, can_split: bool = True) -> str:
+                          can_double: bool = True, can_split: bool = True,
+                          game_state=None) -> str:
         """Get the optimal action based on basic strategy"""
         
         # Get dealer upcard index
@@ -91,12 +93,11 @@ class BasicStrategy:
         # Check for pairs first (if splitting is allowed)
         if can_split and player_hand.can_split():
             pair_rank = player_hand.cards[0].rank
-            action = self.pair_table[pair_rank][dealer_idx]
+            split_action = self._get_split_action(pair_rank, dealer_idx, game_state)
             
-            # Only return the pair action if it's actually 'P' (split)
-            # Otherwise, treat as regular hand (e.g., 5,5 or 10,10)
-            if action == 'P':
-                return action
+            # Return the split action (could be 'P' for split or alternative action)
+            if split_action:
+                return split_action
         
         # Check for soft hands
         if player_hand.is_soft and player_hand.value <= 21:
@@ -136,6 +137,66 @@ class BasicStrategy:
             'P': 'split'
         }
         return action_map.get(action, 'stand')
+    
+    def _get_split_action(self, pair_rank: str, dealer_idx: int, game_state=None) -> str:
+        """Get split action considering game rules and current state"""
+        # Get base strategy action
+        base_action = self.pair_table[pair_rank][dealer_idx]
+        
+        # Strategy recommends split - check if game allows it
+        if base_action == 'P':
+            if game_state:
+                # Check split limits
+                if hasattr(game_state, 'player_hands') and hasattr(game_state, 'can_split_current_hand'):
+                    if not game_state.can_split_current_hand():
+                        # Can't split due to limits/bankroll, treat as regular hand
+                        return self._get_non_split_action(pair_rank, dealer_idx)
+                
+                # Check rule variations that affect strategy
+                if hasattr(game_state, 'settings') or 'settings' in globals():
+                    from settings import settings
+                    
+                    # Double after split (DAS) rule affects some pairs
+                    if not settings.game_rules.double_after_split:
+                        # Without DAS, some pairs become less favorable to split
+                        if pair_rank == '4' and dealer_idx in [3, 4]:  # 4-4 vs 5-6
+                            return 'H'  # Hit instead of split without DAS
+                        if pair_rank == '6' and dealer_idx in [1]:     # 6-6 vs 3  
+                            return 'H'  # Hit instead of split without DAS
+            
+            # Default: return the recommended split
+            return 'P'
+        
+        # Strategy doesn't recommend split, return the base action
+        return base_action
+    
+    def _get_non_split_action(self, pair_rank: str, dealer_idx: int) -> str:
+        """Get action for pair when splitting is not allowed/recommended"""
+        # Convert pair to hand value and get regular strategy
+        pair_value = self._get_pair_value(pair_rank)
+        
+        if pair_rank == 'A':
+            # A-A treated as soft 12 when can't split
+            if 12 in self.soft_table:
+                action = self.soft_table[12][dealer_idx]
+                return self._convert_action(action, True)  # Assume can double
+            else:
+                return 'H'
+        elif pair_value <= 21 and pair_value in self.hard_table:
+            # Most pairs are hard hands when can't split
+            action = self.hard_table[pair_value][dealer_idx]
+            return self._convert_action(action, True)  # Assume can double
+        else:
+            return 'S'  # Default for high values or missing entries
+    
+    def _get_pair_value(self, pair_rank: str) -> int:
+        """Get the total value of a pair"""
+        if pair_rank == 'A':
+            return 12  # A-A = 2 or 12, treat as soft 12
+        elif pair_rank in ['J', 'Q', 'K']:
+            return 20  # 10-value pairs
+        else:
+            return int(pair_rank) * 2
 
 
 class StrategyTracker:
@@ -148,11 +209,12 @@ class StrategyTracker:
         self.strategy = BasicStrategy()
     
     def record_decision(self, player_hand: Hand, dealer_upcard: Card,
-                       player_action: str, can_double: bool, can_split: bool):
+                       player_action: str, can_double: bool, can_split: bool,
+                       game_state=None, hand_index: int = 0):
         """Record a player decision and check against basic strategy"""
-        # Get optimal action
+        # Get optimal action with game state context
         optimal = self.strategy.get_optimal_action(
-            player_hand, dealer_upcard, can_double, can_split
+            player_hand, dealer_upcard, can_double, can_split, game_state
         )
         optimal_game_action = self.strategy.action_to_game_action(optimal)
         
@@ -172,15 +234,24 @@ class StrategyTracker:
         if is_correct:
             self.correct_decisions += 1
         else:
-            # Record deviation
-            self.deviations.append({
+            # Record deviation with enhanced context
+            deviation = {
                 'hand_value': player_hand.value,
                 'is_soft': player_hand.is_soft,
                 'dealer_upcard': str(dealer_upcard),
                 'player_action': player_action,
                 'optimal_action': optimal_game_action,
-                'cards': [str(card) for card in player_hand.cards]
-            })
+                'cards': [str(card) for card in player_hand.cards],
+                'hand_index': hand_index
+            }
+            
+            # Add split context if relevant
+            if game_state and hasattr(game_state, 'player_hands'):
+                deviation['is_split_hand'] = len(game_state.player_hands) > 1
+                deviation['total_hands'] = len(game_state.player_hands)
+                deviation['is_pair'] = player_hand.can_split()
+            
+            self.deviations.append(deviation)
         
         return is_correct, optimal_game_action
     

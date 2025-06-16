@@ -205,6 +205,55 @@ class SettingsDialog:
                                    textvariable=self.default_bankroll_var, width=15)
         bankroll_spin.grid(row=0, column=1, padx=5, pady=5)
         
+        # Betting Strategy
+        strategy_frame = ttk.LabelFrame(frame, text="Betting Strategy", padding=10)
+        strategy_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Strategy selection
+        ttk.Label(strategy_frame, text="Betting strategy:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
+        self.betting_strategy_var = tk.StringVar(value=self.temp_settings.betting_limits.betting_strategy)
+        strategy_combo = ttk.Combobox(strategy_frame, textvariable=self.betting_strategy_var,
+                                     values=["flat", "spread", "kelly"], state="readonly", width=15)
+        strategy_combo.grid(row=0, column=1, padx=5, pady=5)
+        strategy_combo.bind("<<ComboboxSelected>>", self._on_strategy_change)
+        
+        # Spread betting options
+        self.spread_frame = ttk.Frame(strategy_frame)
+        self.spread_frame.grid(row=1, column=0, columnspan=3, sticky="ew", pady=10)
+        
+        ttk.Label(self.spread_frame, text="Spread range:").grid(row=0, column=0, sticky="w", padx=5)
+        ttk.Label(self.spread_frame, text="Min:").grid(row=0, column=1, padx=5)
+        self.spread_min_var = tk.DoubleVar(value=self.temp_settings.betting_limits.spread_min_multiplier)
+        min_spin = ttk.Spinbox(self.spread_frame, from_=0.5, to=2.0, increment=0.5,
+                              textvariable=self.spread_min_var, width=8)
+        min_spin.grid(row=0, column=2, padx=5)
+        
+        ttk.Label(self.spread_frame, text="Max:").grid(row=0, column=3, padx=5)
+        self.spread_max_var = tk.DoubleVar(value=self.temp_settings.betting_limits.spread_max_multiplier)
+        max_spin = ttk.Spinbox(self.spread_frame, from_=2.0, to=20.0, increment=1.0,
+                              textvariable=self.spread_max_var, width=8)
+        max_spin.grid(row=0, column=4, padx=5)
+        
+        ttk.Label(self.spread_frame, text="Start at count:").grid(row=1, column=0, sticky="w", padx=5, pady=5)
+        self.spread_start_var = tk.DoubleVar(value=self.temp_settings.betting_limits.spread_start_count)
+        start_spin = ttk.Spinbox(self.spread_frame, from_=0.0, to=5.0, increment=0.5,
+                                textvariable=self.spread_start_var, width=8)
+        start_spin.grid(row=1, column=1, padx=5, pady=5)
+        
+        # Kelly options
+        self.kelly_frame = ttk.Frame(strategy_frame)
+        self.kelly_frame.grid(row=2, column=0, columnspan=3, sticky="ew", pady=10)
+        
+        ttk.Label(self.kelly_frame, text="Kelly fraction:").grid(row=0, column=0, sticky="w", padx=5)
+        self.kelly_fraction_var = tk.DoubleVar(value=self.temp_settings.betting_limits.kelly_fraction)
+        kelly_spin = ttk.Spinbox(self.kelly_frame, from_=0.1, to=1.0, increment=0.05,
+                                textvariable=self.kelly_fraction_var, width=8)
+        kelly_spin.grid(row=0, column=1, padx=5)
+        ttk.Label(self.kelly_frame, text="(0.25 = 25% Kelly)").grid(row=0, column=2, padx=5)
+        
+        # Initially hide strategy-specific options
+        self._on_strategy_change()
+        
     def _create_shoe_tab(self):
         """Create the shoe configuration tab"""
         frame = ttk.Frame(self.notebook)
@@ -421,6 +470,20 @@ class SettingsDialog:
         else:
             self.delay_spin.config(state="disabled")
     
+    def _on_strategy_change(self, event=None):
+        """Show/hide betting strategy options based on selection"""
+        strategy = self.betting_strategy_var.get()
+        
+        if strategy == "spread":
+            self.spread_frame.grid()
+            self.kelly_frame.grid_remove()
+        elif strategy == "kelly":
+            self.spread_frame.grid_remove()
+            self.kelly_frame.grid()
+        else:  # flat
+            self.spread_frame.grid_remove()
+            self.kelly_frame.grid_remove()
+    
     def _save_settings(self):
         """Save settings and close dialog"""
         # Update temp settings from UI
@@ -465,6 +528,13 @@ class SettingsDialog:
         self.temp_settings.betting_limits.default_bet = self.default_bet_var.get()
         self.temp_settings.betting_limits.bet_increment = self.bet_increment_var.get()
         self.temp_settings.betting_limits.default_bankroll = self.default_bankroll_var.get()
+        
+        # Betting Strategy
+        self.temp_settings.betting_limits.betting_strategy = self.betting_strategy_var.get()
+        self.temp_settings.betting_limits.spread_min_multiplier = self.spread_min_var.get()
+        self.temp_settings.betting_limits.spread_max_multiplier = self.spread_max_var.get()
+        self.temp_settings.betting_limits.kelly_fraction = self.kelly_fraction_var.get()
+        self.temp_settings.betting_limits.spread_start_count = self.spread_start_var.get()
         
         # Shoe Configuration
         self.temp_settings.shoe_config.num_decks = self.num_decks_var.get()

@@ -195,8 +195,10 @@ class GameState:
     
     def __init__(self):
         self.shoe = Shoe()
-        self.player_hand: Optional[Hand] = None
+        self.player_hands: List[Hand] = []  # List of player hands (for splits)
         self.dealer_hand: Optional[Hand] = None
+        self.hand_bets: List[int] = []  # Bet amount for each hand
+        self.active_hand_index: int = 0  # Which hand is currently being played
         self.current_bet = settings.betting_limits.default_bet
         self.bankroll = settings.betting_limits.default_bankroll
         self.hands_played = 0
@@ -209,69 +211,184 @@ class GameState:
         self.blackjacks = 0
         self.total_wagered = 0.0
     
+    @property
+    def player_hand(self) -> Optional[Hand]:
+        """Backwards compatibility - returns current active hand"""
+        if self.player_hands:
+            if self.active_hand_index < len(self.player_hands):
+                return self.player_hands[self.active_hand_index]
+            return self.player_hands[0]  # Fallback to first hand
+        return None
+    
+    @player_hand.setter
+    def player_hand(self, hand: Hand):
+        """Backwards compatibility - sets as first hand"""
+        self.player_hands = [hand] if hand else []
+        self.hand_bets = [self.current_bet] if hand else []
+        self.active_hand_index = 0
+    
     def start_new_hand(self, bet_amount: int):
         """Start a new hand with the specified bet"""
         if self.shoe.needs_shuffle:
             self.shoe.shuffle()
         
         self.current_bet = bet_amount
-        self.player_hand = Hand()
+        
+        # Initialize with single hand
+        initial_hand = Hand()
+        self.player_hands = [initial_hand]
+        self.hand_bets = [bet_amount]
+        self.active_hand_index = 0
         self.dealer_hand = Hand(is_dealer=True)
         
         # Deal initial cards (player, dealer, player, dealer)
-        self.player_hand.add_card(self.shoe.deal_card())
+        self.player_hands[0].add_card(self.shoe.deal_card())
         self.dealer_hand.add_card(self.shoe.deal_card())
-        self.player_hand.add_card(self.shoe.deal_card())
+        self.player_hands[0].add_card(self.shoe.deal_card())
         self.dealer_hand.add_card(self.shoe.deal_card())
         
         self.phase = "playing"
         self.hands_played += 1
         
         # Check for blackjacks
-        if self.player_hand.is_blackjack or self.dealer_hand.is_blackjack:
+        if self.player_hands[0].is_blackjack or self.dealer_hand.is_blackjack:
             self.phase = "complete"
     
     def player_hit(self) -> bool:
         """Player takes a card. Returns False if bust."""
-        if self.phase != "playing":
+        return self.player_hit_hand(self.active_hand_index)
+    
+    def player_hit_hand(self, hand_index: int) -> bool:
+        """Player takes a card on specific hand. Returns False if bust."""
+        if self.phase != "playing" or hand_index >= len(self.player_hands):
             return False
             
-        self.player_hand.add_card(self.shoe.deal_card())
+        hand = self.player_hands[hand_index]
+        hand.add_card(self.shoe.deal_card())
         
-        if self.player_hand.is_bust:
-            self.phase = "complete"
-            return False
+        # Check if this hand is done (bust or 21)
+        if hand.is_bust or hand.value == 21:
+            return self._advance_to_next_hand()
+        
         return True
     
     def player_stand(self):
-        """Player stands, dealer's turn"""
+        """Player stands current hand"""
         if self.phase != "playing":
             return
             
-        self.player_hand.stood = True
-        self.phase = "dealer_turn"
-        self.play_dealer_hand()
+        # Mark current hand as stood
+        if self.active_hand_index < len(self.player_hands):
+            self.player_hands[self.active_hand_index].stood = True
+        
+        # Move to next hand or finish
+        self._advance_to_next_hand()
     
     def player_double(self) -> bool:
         """Player doubles down. Returns False if not allowed."""
-        if self.phase != "playing" or not self.player_hand.can_double():
+        if self.phase != "playing":
+            return False
+        
+        hand = self.player_hands[self.active_hand_index]
+        current_hand_bet = self.hand_bets[self.active_hand_index]
+        
+        if not hand.can_double():
             return False
         
         # Double the bet (ensure bankroll can cover it)
-        if self.bankroll < self.current_bet:
+        if self.bankroll < current_hand_bet:
             return False
             
-        self.current_bet *= 2
-        self.player_hand.doubled = True
+        self.hand_bets[self.active_hand_index] *= 2
+        hand.doubled = True
         
         # Take exactly one card and stand
-        self.player_hand.add_card(self.shoe.deal_card())
+        hand.add_card(self.shoe.deal_card())
         
-        if not self.player_hand.is_bust:
-            self.phase = "dealer_turn"
-            self.play_dealer_hand()
-        else:
-            self.phase = "complete"
+        # This hand is now complete, move to next hand
+        self._advance_to_next_hand()
+        
+        return True
+    
+    def player_split(self) -> bool:
+        """Player splits current hand. Returns False if not allowed."""
+        if self.phase != "playing":
+            return False
+        
+        hand = self.player_hands[self.active_hand_index]
+        current_hand_bet = self.hand_bets[self.active_hand_index]
+        
+        # Check if split is allowed
+        if not hand.can_split():
+            return False
+        
+        # Check max splits limit
+        if len(self.player_hands) >= settings.game_rules.max_splits + 1:
+            return False
+        
+        # Check bankroll for additional bet
+        if self.bankroll < current_hand_bet:
+            return False
+        
+        # Perform the split
+        card1, card2 = hand.cards[0], hand.cards[1]
+        
+        # Create new hand with second card
+        new_hand = Hand()
+        new_hand.add_card(card2)
+        
+        # Original hand keeps first card
+        hand.cards = [card1]
+        hand._calculate_value()
+        hand.is_blackjack = False  # Split hands can't be blackjack
+        
+        # Insert new hand after current one
+        self.player_hands.insert(self.active_hand_index + 1, new_hand)
+        self.hand_bets.insert(self.active_hand_index + 1, current_hand_bet)
+        
+        # Deal one card to each hand
+        hand.add_card(self.shoe.deal_card())
+        new_hand.add_card(self.shoe.deal_card())
+        
+        # Special rule for split aces - only get one card each
+        if card1.rank == 'A' and settings.game_rules.split_aces_one_card:
+            # Both hands are complete, move to next non-ace hand or dealer
+            self._advance_to_next_hand()
+        
+        return True
+    
+    def _advance_to_next_hand(self) -> bool:
+        """Advance to next hand or finish all hands. Returns True if continuing play."""
+        self.active_hand_index += 1
+        
+        # Check if there are more hands to play
+        if self.active_hand_index < len(self.player_hands):
+            return True
+        
+        # All hands complete, dealer plays
+        self.phase = "dealer_turn"
+        self.play_dealer_hand()
+        return False
+    
+    def can_split_current_hand(self) -> bool:
+        """Check if current active hand can be split"""
+        if self.phase != "playing" or self.active_hand_index >= len(self.player_hands):
+            return False
+        
+        hand = self.player_hands[self.active_hand_index]
+        
+        # Basic split requirements
+        if not hand.can_split():
+            return False
+        
+        # Max splits limit
+        if len(self.player_hands) >= settings.game_rules.max_splits + 1:
+            return False
+        
+        # Bankroll check
+        current_hand_bet = self.hand_bets[self.active_hand_index]
+        if self.bankroll < current_hand_bet:
+            return False
         
         return True
     
@@ -283,18 +400,31 @@ class GameState:
         self.phase = "complete"
     
     def complete_hand(self) -> Tuple[str, float]:
-        """Complete the hand and update bankroll"""
-        outcome, payout_mult = GameRules.get_hand_outcome(
-            self.player_hand, self.dealer_hand
-        )
+        """Complete all hands and update bankroll - returns summary of first hand for backwards compatibility"""
+        if not self.player_hands:
+            return "No hands", 0.0
+        
+        # For backwards compatibility, if only one hand, use old logic
+        if len(self.player_hands) == 1:
+            return self._complete_single_hand(0)
+        
+        # Multiple hands - process all and return summary
+        return self._complete_all_hands()
+    
+    def _complete_single_hand(self, hand_index: int) -> Tuple[str, float]:
+        """Complete a single hand (backwards compatibility)"""
+        hand = self.player_hands[hand_index]
+        bet = self.hand_bets[hand_index]
+        
+        outcome, payout_mult = GameRules.get_hand_outcome(hand, self.dealer_hand)
         
         # Update bankroll
-        winnings = self.current_bet * payout_mult
-        self.bankroll = self.bankroll - self.current_bet + winnings
-        profit = winnings - self.current_bet
+        winnings = bet * payout_mult
+        self.bankroll = self.bankroll - bet + winnings
+        profit = winnings - bet
         
         # Update statistics
-        self.total_wagered += self.current_bet
+        self.total_wagered += bet
         if outcome == "Push":
             self.pushes += 1
         elif outcome == "Blackjack!":
@@ -306,6 +436,66 @@ class GameState:
             self.losses += 1
         
         return outcome, profit
+    
+    def _complete_all_hands(self) -> Tuple[str, float]:
+        """Complete all hands and return summary"""
+        total_profit = 0.0
+        wins = 0
+        losses = 0
+        pushes = 0
+        hand_results = []
+        
+        for i, (hand, bet) in enumerate(zip(self.player_hands, self.hand_bets)):
+            outcome, payout_mult = GameRules.get_hand_outcome(hand, self.dealer_hand)
+            
+            # Calculate winnings for this hand
+            winnings = bet * payout_mult
+            profit = winnings - bet
+            total_profit += profit
+            
+            # Track results
+            hand_results.append((i+1, outcome, profit))
+            
+            # Update statistics
+            self.total_wagered += bet
+            if outcome == "Push":
+                self.pushes += 1
+                pushes += 1
+            elif outcome == "Blackjack!":
+                self.wins += 1
+                self.blackjacks += 1
+                wins += 1
+            elif payout_mult > 1.0:  # Win
+                self.wins += 1
+                wins += 1
+            else:  # Loss
+                self.losses += 1
+                losses += 1
+        
+        # Update bankroll with total
+        self.bankroll += total_profit
+        
+        # Create summary message
+        if wins == len(self.player_hands):
+            summary = f"All {len(self.player_hands)} hands won!"
+        elif losses == len(self.player_hands):
+            summary = f"All {len(self.player_hands)} hands lost"
+        elif pushes == len(self.player_hands):
+            summary = f"All {len(self.player_hands)} hands pushed"
+        else:
+            summary = f"{wins}W/{losses}L/{pushes}P"
+        
+        return summary, total_profit
+    
+    def get_hand_results(self) -> List[Tuple[str, float]]:
+        """Get detailed results for each hand"""
+        results = []
+        for i, (hand, bet) in enumerate(zip(self.player_hands, self.hand_bets)):
+            outcome, payout_mult = GameRules.get_hand_outcome(hand, self.dealer_hand)
+            winnings = bet * payout_mult
+            profit = winnings - bet
+            results.append((outcome, profit))
+        return results
     
     def get_win_percentage(self) -> float:
         """Get win percentage (excluding pushes)"""

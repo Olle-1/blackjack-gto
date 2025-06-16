@@ -28,7 +28,8 @@ class BlackjackTable:
         
         # Card display tracking
         self.dealer_card_ids = []
-        self.player_card_ids = []
+        self.player_card_ids = []  # List of lists for multiple hands
+        self.hand_highlights = []  # Highlight rectangles for each hand
         
         self._draw_table()
     
@@ -120,8 +121,10 @@ class BlackjackTable:
     def clear_cards(self):
         """Remove all cards from the table"""
         self.canvas.delete("card")
+        self.canvas.delete("hand_highlight")
         self.dealer_card_ids.clear()
         self.player_card_ids.clear()
+        self.hand_highlights.clear()
     
     def update_dealer_cards(self, cards: List[Tuple[str, bool]]):
         """Update dealer's card display"""
@@ -137,19 +140,68 @@ class BlackjackTable:
             card_id = self.display_card(card_text, x, DEALER_CARD_Y, face_down)
             self.dealer_card_ids.append(card_id)
     
-    def update_player_cards(self, cards: List[str]):
-        """Update player's card display"""
-        # Clear existing player cards
-        for card_id in self.player_card_ids:
-            self.canvas.delete(card_id)
+    def update_player_cards(self, hands_cards: List[List[str]], active_hand_index: int = 0):
+        """Update multiple player hands display"""
+        # Clear existing player cards and highlights
+        for hand_cards in self.player_card_ids:
+            for card_id in hand_cards:
+                self.canvas.delete(card_id)
+        for highlight_id in self.hand_highlights:
+            self.canvas.delete(highlight_id)
         self.player_card_ids.clear()
+        self.hand_highlights.clear()
         
-        # Display new cards
-        x_start = 600 - (len(cards) * (CARD_WIDTH + CARD_SPACING)) // 2
-        for i, card_text in enumerate(cards):
-            x = x_start + i * (CARD_WIDTH + CARD_SPACING)
-            card_id = self.display_card(card_text, x, PLAYER_CARD_Y)
-            self.player_card_ids.append(card_id)
+        if not hands_cards:
+            return
+        
+        num_hands = len(hands_cards)
+        
+        # Calculate positioning for multiple hands
+        if num_hands == 1:
+            # Single hand - center position
+            hand_positions = [600]
+        elif num_hands == 2:
+            # Two hands - side by side
+            hand_positions = [450, 750]
+        elif num_hands == 3:
+            # Three hands
+            hand_positions = [350, 600, 850]
+        else:  # 4 hands
+            hand_positions = [300, 500, 700, 900]
+        
+        # Display each hand
+        for hand_idx, (cards, x_center) in enumerate(zip(hands_cards, hand_positions)):
+            hand_card_ids = []
+            
+            if not cards:
+                continue
+            
+            # Calculate card positions for this hand
+            total_width = len(cards) * CARD_WIDTH + (len(cards) - 1) * CARD_SPACING
+            x_start = x_center - total_width // 2
+            
+            # Add highlight for active hand
+            if hand_idx == active_hand_index and num_hands > 1:
+                highlight_margin = 15
+                highlight_id = self.canvas.create_rectangle(
+                    x_start - highlight_margin,
+                    PLAYER_CARD_Y - highlight_margin,
+                    x_start + total_width + highlight_margin,
+                    PLAYER_CARD_Y + CARD_HEIGHT + highlight_margin,
+                    outline='#FFD700',  # Gold color
+                    width=4,
+                    fill='#FFFF0020',  # Light yellow transparent fill
+                    tags="hand_highlight"
+                )
+                self.hand_highlights.append(highlight_id)
+            
+            # Display cards for this hand
+            for i, card_text in enumerate(cards):
+                x = x_start + i * (CARD_WIDTH + CARD_SPACING)
+                card_id = self.display_card(card_text, x, PLAYER_CARD_Y)
+                hand_card_ids.append(card_id)
+            
+            self.player_card_ids.append(hand_card_ids)
 
 class ControlPanel:
     """Panel containing game control buttons"""
@@ -432,17 +484,50 @@ class GameControls:
             fg=TEXT_COLOR
         )
         self.hand_info_label.grid(row=0, column=3, padx=20)
+        
+        # Betting suggestion
+        self.bet_suggestion_label = tk.Label(
+            self.frame,
+            text="",
+            font=('Arial', 12, 'italic'),
+            bg=TABLE_COLOR,
+            fg=SUCCESS_COLOR,
+            width=30
+        )
+        self.bet_suggestion_label.grid(row=1, column=0, columnspan=4, pady=5)
     
     def update_hand_info(self, dealer_value: Optional[int], 
-                        player_value: Optional[int]):
-        """Update hand value display"""
-        if dealer_value is None and player_value is None:
+                        player_values: List[int], active_hand_index: int = 0):
+        """Update hand value display for multiple hands"""
+        if dealer_value is None and not player_values:
             self.hand_info_label.config(text="")
             return
         
         dealer_text = f"Dealer: {dealer_value}" if dealer_value else "Dealer: ?"
-        player_text = f"Player: {player_value}" if player_value else "Player: -"
+        
+        if not player_values:
+            player_text = "Player: -"
+        elif len(player_values) == 1:
+            player_text = f"Player: {player_values[0]}"
+        else:
+            # Multiple hands - show all with active highlighted
+            hand_texts = []
+            for i, value in enumerate(player_values):
+                if i == active_hand_index:
+                    hand_texts.append(f"[{value}]")  # Brackets for active hand
+                else:
+                    hand_texts.append(str(value))
+            player_text = f"Hands: {' | '.join(hand_texts)}"
+        
         self.hand_info_label.config(text=f"{dealer_text}  |  {player_text}")
+    
+    def update_bet_suggestion(self, suggestion_text: str):
+        """Update betting suggestion display"""
+        self.bet_suggestion_label.config(text=suggestion_text)
+    
+    def clear_bet_suggestion(self):
+        """Clear betting suggestion display"""
+        self.bet_suggestion_label.config(text="")
 
 class MessageDisplay:
     """Display game messages and results"""

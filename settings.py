@@ -18,6 +18,7 @@ class GameRules:
     max_splits: int = 3
     double_on_any_two: bool = True  # False = only 10,11
     insurance_allowed: bool = True
+    split_aces_one_card: bool = True  # Split aces get only one card each
     
 @dataclass
 class BettingLimits:
@@ -27,6 +28,13 @@ class BettingLimits:
     default_bet: int = 25
     default_bankroll: int = 1000
     bet_increment: int = 5
+    
+    # Betting strategy settings
+    betting_strategy: str = "flat"  # "flat", "spread", "kelly"
+    spread_min_multiplier: float = 1.0  # Minimum bet multiplier for spread betting
+    spread_max_multiplier: float = 8.0  # Maximum bet multiplier for spread betting
+    kelly_fraction: float = 0.25  # Fractional Kelly (25% of full Kelly)
+    spread_start_count: float = 1.0  # True count to start spreading bets
     
 @dataclass
 class ShoeConfiguration:
