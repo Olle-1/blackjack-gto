@@ -3,6 +3,7 @@
 import random
 from typing import List, Tuple, Optional, Dict
 from config import *
+from settings import settings
 
 class Card:
     """Represents a single playing card"""
@@ -35,11 +36,11 @@ class Card:
 class Shoe:
     """Manages a multi-deck shoe with penetration tracking"""
     
-    def __init__(self, num_decks: int = DECKS_IN_SHOE):
-        self.num_decks = num_decks
+    def __init__(self, num_decks: int = None):
+        self.num_decks = num_decks or settings.shoe_config.num_decks
         self.cards: List[Card] = []
         self.dealt_count = 0
-        self.penetration_cards = int(num_decks * 52 * (1 - DEFAULT_PENETRATION))
+        self.penetration_cards = int(self.num_decks * 52 * (1 - settings.shoe_config.penetration))
         self.needs_shuffle = False
         self._create_and_shuffle()
     
@@ -57,6 +58,10 @@ class Shoe:
         random.shuffle(self.cards)
         self.dealt_count = 0
         self.needs_shuffle = False
+        
+        # Burn first card if enabled
+        if settings.shoe_config.burn_card and self.cards:
+            self.cards.pop(0)
     
     def deal_card(self) -> Optional[Card]:
         """Deal a card from the shoe"""
@@ -151,12 +156,8 @@ class GameRules:
     
     @staticmethod
     def dealer_must_hit(hand: Hand) -> bool:
-        """Determine if dealer must hit based on standard rules"""
-        if hand.value < DEALER_STAND_ON:
-            return True
-        # Some variations have dealer hit on soft 17
-        # For now, we'll use standard rules (stand on all 17s)
-        return False
+        """Determine if dealer must hit based on game rules"""
+        return settings.dealer_must_hit(hand.value, hand.is_soft)
     
     @staticmethod
     def get_hand_outcome(player_hand: Hand, dealer_hand: Hand) -> Tuple[str, float]:
@@ -173,7 +174,7 @@ class GameRules:
         elif dealer_bj:
             return ("Dealer Blackjack", 0.0)  # Lose bet
         elif player_bj:
-            return ("Blackjack!", 1.0 + BLACKJACK_PAYOUT)  # 3:2 payout
+            return ("Blackjack!", 1.0 + settings.game_rules.blackjack_payout)  # Configurable payout
         
         # Check for busts
         if player_hand.is_bust:
@@ -196,8 +197,8 @@ class GameState:
         self.shoe = Shoe()
         self.player_hand: Optional[Hand] = None
         self.dealer_hand: Optional[Hand] = None
-        self.current_bet = DEFAULT_BET
-        self.bankroll = DEFAULT_BANKROLL
+        self.current_bet = settings.betting_limits.default_bet
+        self.bankroll = settings.betting_limits.default_bankroll
         self.hands_played = 0
         self.phase = "betting"  # betting, playing, dealer_turn, complete
         

@@ -3,7 +3,11 @@
     "allow": [
       "Bash(mkdir:*)",
       "Bash(python3:*)",
-      "Bash(pip3 install:*)"
+      "Bash(pip3 install:*)",
+      "Bash(rg:*)",
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(python test_settings_integration.py)"
     ],
     "deny": []
   }

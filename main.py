@@ -15,18 +15,24 @@ from ui_components import (
     GameControls, MessageDisplay, StrategyDisplay
 )
 from session_stats_display import SessionStatsDisplay
+from settings import settings
+from settings_dialog import SettingsDialog
+from auto_play import AutoPlayer, DifficultyLevel, PracticeMode
 
 class BlackjackGame:
     """Main application class that coordinates game logic and UI"""
     
     def __init__(self):
+        # Load settings first
+        settings.load()
+        
         # Initialize Tkinter root
         self.root = tk.Tk()
         self.root.title(WINDOW_TITLE)
         self.root.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
         self.root.minsize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.root.resizable(True, True)  # Allow resizing if needed
-        self.root.configure(bg=TABLE_COLOR)
+        self.root.configure(bg=settings.display_prefs.table_color)
         
         # Initialize game components
         self.game_state = GameState()
@@ -34,9 +40,24 @@ class BlackjackGame:
         self.ev_calculator = EVCalculator()
         self.strategy_tracker = StrategyTracker()
         
+        # Initialize practice mode components
+        self.auto_player = AutoPlayer(self.strategy_tracker.strategy)
+        self.practice_mode = PracticeMode()
+        self.practice_mode.set_auto_player(self.auto_player)
+        self.practice_mode.start_practice_session()
+        
+        # Auto-deal timer
+        self.auto_deal_timer = None
+        
+        # Auto-play state
+        self.auto_play_active = False
+        
         # Setup UI
         self._setup_ui()
         self._setup_bindings()
+        
+        # Apply settings to UI
+        self._apply_settings()
         
         # Start with a fresh shoe
         self.new_shoe()
@@ -68,6 +89,12 @@ class BlackjackGame:
         self.game_controls.new_shoe_btn.config(command=self.new_shoe)
         self.game_controls.reset_count_btn.config(command=self.reset_count)
         self.game_controls.settings_btn.config(command=self.show_settings)
+        
+        # Set up auto-player callback
+        self.auto_player.set_action_callback(self._auto_play_action)
+        
+        # Set up count visibility refresh callback
+        self.info_display.set_update_callback(self.update_displays)
     
     def _setup_bindings(self):
         """Setup keyboard bindings"""
@@ -77,6 +104,8 @@ class BlackjackGame:
         self.root.bind('n', lambda e: self.new_hand())
         self.root.bind('<space>', lambda e: self.new_hand())
         self.root.bind('<Escape>', lambda e: self.root.quit())
+        self.root.bind('a', lambda e: self.toggle_auto_play())
+        self.root.bind('p', lambda e: self.toggle_auto_deal())
     
     def new_shoe(self):
         """Start a new shoe"""
@@ -103,20 +132,42 @@ class BlackjackGame:
             self.message_display.show_message("Count and strategy tracking reset")
     
     def show_settings(self):
-        """Show settings dialog (placeholder for now)"""
-        messagebox.showinfo("Settings", "Settings dialog coming soon!")
+        """Show settings dialog"""
+        dialog = SettingsDialog(self.root, settings, self._on_settings_saved)
+        dialog.show()
+    
+    def _on_settings_saved(self):
+        """Called when settings are saved"""
+        # Apply new settings
+        self._apply_settings()
+        
+        # Recreate shoe if deck count changed
+        if self.game_state.shoe.num_decks != settings.shoe_config.num_decks:
+            self.new_shoe()
+        
+        # Update displays
+        self.update_displays()
+    
+    def _apply_settings(self):
+        """Apply current settings to the game"""
+        # Update table color
+        self.root.configure(bg=settings.display_prefs.table_color)
+        
+        # Update shoe if needed
+        if hasattr(self.game_state, 'shoe') and self.game_state.shoe.num_decks != settings.shoe_config.num_decks:
+            self.game_state.shoe = self.game_state.shoe.__class__(settings.shoe_config.num_decks)
     
     def increase_bet(self):
         """Increase bet size"""
         if self.game_state.phase != "betting":
             return
         
-        # Increase by minimum bet increments
-        new_bet = self.game_state.current_bet + MIN_BET
+        # Increase by bet increment
+        new_bet = self.game_state.current_bet + settings.betting_limits.bet_increment
         
         # Check maximum bet and bankroll limits
-        if new_bet > MAX_BET:
-            new_bet = MAX_BET
+        if new_bet > settings.betting_limits.max_bet:
+            new_bet = settings.betting_limits.max_bet
         if new_bet > self.game_state.bankroll:
             new_bet = int(self.game_state.bankroll)
         
@@ -128,15 +179,28 @@ class BlackjackGame:
         if self.game_state.phase != "betting":
             return
         
-        # Decrease by minimum bet increments
-        new_bet = self.game_state.current_bet - MIN_BET
+        # Decrease by bet increment
+        new_bet = self.game_state.current_bet - settings.betting_limits.bet_increment
         
         # Check minimum bet
-        if new_bet < MIN_BET:
-            new_bet = MIN_BET
+        if new_bet < settings.betting_limits.min_bet:
+            new_bet = settings.betting_limits.min_bet
         
         self.game_state.current_bet = new_bet
         self.control_panel.update_bet_display(new_bet)
+    
+    def _schedule_auto_deal(self):
+        """Schedule automatic dealing of next hand"""
+        if hasattr(self, 'auto_deal_timer') and self.auto_deal_timer:
+            self.root.after_cancel(self.auto_deal_timer)
+        
+        delay = int(settings.practice_modes.auto_deal_delay * 1000)
+        self.auto_deal_timer = self.root.after(delay, self._auto_deal_hand)
+    
+    def _auto_deal_hand(self):
+        """Automatically deal a new hand"""
+        if self.game_state.phase == "betting" and settings.practice_modes.auto_deal:
+            self.new_hand()
     
     def new_hand(self):
         """Deal a new hand"""
@@ -213,6 +277,9 @@ class BlackjackGame:
             self.strategy_tracker.get_adherence_percentage()
         )
         
+        # Record decision in practice mode
+        self.practice_mode.record_decision(is_correct)
+        
         self.game_state.player_hit()
         
         # Update count with new card
@@ -263,6 +330,9 @@ class BlackjackGame:
         )
         self.strategy_display.clear_hint()
         
+        # Record decision in practice mode
+        self.practice_mode.record_decision(is_correct)
+        
         self.control_panel.disable_all_buttons()
         self.game_state.player_stand()
         
@@ -283,6 +353,14 @@ class BlackjackGame:
         if self.game_state.phase != "playing":
             return
         
+        # Check double rules
+        if not settings.game_rules.double_on_any_two:
+            # Only allow double on 9, 10, 11
+            total = self.game_state.player_hand.value
+            if total not in [9, 10, 11]:
+                self.message_display.show_message("Double only allowed on 9, 10, or 11", ERROR_COLOR)
+                return
+        
         # Track decision before doubling
         is_correct, optimal = self.strategy_tracker.record_decision(
             self.game_state.player_hand,
@@ -298,6 +376,9 @@ class BlackjackGame:
             self.strategy_tracker.get_adherence_percentage()
         )
         self.strategy_display.clear_hint()
+        
+        # Record decision in practice mode
+        self.practice_mode.record_decision(is_correct)
         
         if not self.game_state.player_double():
             self.message_display.show_message("Cannot double!", ERROR_COLOR)
@@ -336,6 +417,9 @@ class BlackjackGame:
             self.game_state.current_bet, true_count, profit
         )
         
+        # Record hand played in practice mode
+        self.practice_mode.record_hand_played()
+        
         # Display outcome
         color = SUCCESS_COLOR if profit > 0 else ERROR_COLOR if profit < 0 else TEXT_COLOR
         profit_text = f" (${profit:+.2f})" if profit != 0 else ""
@@ -350,6 +434,10 @@ class BlackjackGame:
         
         # Re-enable bet controls
         self.control_panel.enable_bet_controls()
+        
+        # Auto-deal if enabled
+        if settings.practice_modes.auto_deal:
+            self._schedule_auto_deal()
     
     def display_hands(self, show_hole_card: bool = False):
         """Update card display on table"""
@@ -396,6 +484,90 @@ class BlackjackGame:
         game_stats = self.game_state.get_session_stats()
         ev_stats = self.ev_calculator.session_stats.get_session_summary()
         self.session_stats_display.update_stats(game_stats, ev_stats)
+    
+    def toggle_auto_play(self):
+        """Toggle auto-play mode"""
+        if self.auto_play_active:
+            self.stop_auto_play()
+        else:
+            self.start_auto_play()
+    
+    def start_auto_play(self):
+        """Start auto-play mode"""
+        if self.auto_play_active:
+            return
+        
+        self.auto_play_active = True
+        self.auto_player.set_speed(int(settings.practice_modes.auto_deal_delay * 1000))
+        self.auto_player.start_auto_play()
+        self.message_display.show_message("Auto-play started! Press 'A' to stop.", SUCCESS_COLOR)
+    
+    def stop_auto_play(self):
+        """Stop auto-play mode"""
+        if not self.auto_play_active:
+            return
+        
+        self.auto_play_active = False
+        self.auto_player.stop_auto_play()
+        self.message_display.show_message("Auto-play stopped.")
+    
+    def toggle_auto_deal(self):
+        """Toggle auto-deal mode"""
+        settings.practice_modes.auto_deal = not settings.practice_modes.auto_deal
+        if settings.practice_modes.auto_deal:
+            self.message_display.show_message("Auto-deal enabled! Press 'P' to disable.", SUCCESS_COLOR)
+            self._schedule_auto_deal()
+        else:
+            self.message_display.show_message("Auto-deal disabled.")
+            if self.auto_deal_timer:
+                self.root.after_cancel(self.auto_deal_timer)
+                self.auto_deal_timer = None
+    
+    def _auto_play_action(self):
+        """Execute auto-play action"""
+        if not self.auto_play_active:
+            return
+        
+        try:
+            if self.game_state.phase == "betting":
+                # Deal a new hand
+                self.new_hand()
+            elif self.game_state.phase == "playing":
+                # Get optimal action and execute it
+                optimal_action = self.auto_player.get_optimal_action(
+                    self.game_state.player_hand,
+                    self.game_state.dealer_hand.cards[0],
+                    self.game_state.player_hand.can_double(),
+                    self.game_state.player_hand.can_split()
+                )
+                
+                # Convert strategy action to game action
+                action_map = {
+                    'H': self.player_hit,
+                    'S': self.player_stand, 
+                    'D': self.player_double,
+                    'P': self.player_split
+                }
+                
+                if optimal_action in action_map:
+                    action_map[optimal_action]()
+                    
+        except Exception as e:
+            print(f"Auto-play error: {e}")
+            self.stop_auto_play()
+    
+    def set_difficulty_level(self, level: str):
+        """Set the difficulty level and apply UI changes"""
+        if self.practice_mode.set_difficulty_level(level):
+            # Apply difficulty settings to UI components
+            ui_components = {
+                'info_display': self.info_display,
+                'strategy_display': self.strategy_display
+            }
+            self.practice_mode.apply_difficulty_settings(ui_components)
+            self.message_display.show_message(f"Difficulty set to: {level.title()}")
+            return True
+        return False
     
     def run(self):
         """Start the application"""

@@ -6,6 +6,7 @@ from typing import Optional, Callable, List, Tuple
 from PIL import Image, ImageTk
 import os
 from config import *
+from settings import settings
 
 class BlackjackTable:
     """Main game table canvas"""
@@ -292,6 +293,7 @@ class InfoDisplay:
         
         # Count visibility toggle
         self.count_visible = True
+        self.parent_update_callback = None  # Will be set by main game
         self.toggle_button = tk.Button(
             self.count_frame,
             text="👁",
@@ -330,6 +332,14 @@ class InfoDisplay:
         if not self.count_visible:
             self.running_count_label.config(text="Running Count: ---")
             self.true_count_label.config(text="True Count: ---")
+        else:
+            # When re-enabled, immediately refresh the display
+            if self.parent_update_callback:
+                self.parent_update_callback()
+    
+    def set_update_callback(self, callback):
+        """Set callback to refresh display when count is re-enabled"""
+        self.parent_update_callback = callback
     
     def update_counts(self, running: int, true: float):
         """Update count displays if visible"""
@@ -348,6 +358,29 @@ class InfoDisplay:
     def update_bankroll(self, amount: float):
         """Update bankroll display"""
         self.bankroll_label.config(text=f"Bankroll: ${amount:.2f}")
+    
+    def update_visibility(self):
+        """Update display visibility based on settings"""
+        # Set count visibility based on settings
+        if settings.practice_modes.show_count_default:
+            self.count_visible = True
+        
+        # Show/hide individual count components
+        if settings.practice_modes.show_running_count:
+            self.running_count_label.pack()
+        else:
+            self.running_count_label.pack_forget()
+        
+        if settings.practice_modes.show_true_count:
+            self.true_count_label.pack()
+        else:
+            self.true_count_label.pack_forget()
+        
+        # Show/hide EV display
+        if settings.practice_modes.show_ev:
+            self.ev_label.pack()
+        else:
+            self.ev_label.pack_forget()
 
 class GameControls:
     """Additional game control buttons"""

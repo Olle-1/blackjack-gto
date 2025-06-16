@@ -1,0 +1,50 @@
+{
+  "game_rules": {
+    "dealer_stand_soft_17": true,
+    "dealer_stand_value": 17,
+    "blackjack_payout": 1.5,
+    "surrender_allowed": false,
+    "late_surrender_only": true,
+    "double_after_split": true,
+    "resplit_aces": false,
+    "max_splits": 3,
+    "double_on_any_two": true,
+    "insurance_allowed": true
+  },
+  "betting_limits": {
+    "min_bet": 5,
+    "max_bet": 500,
+    "default_bet": 25,
+    "default_bankroll": 1000,
+    "bet_increment": 5
+  },
+  "shoe_config": {
+    "num_decks": 6,
+    "penetration": 0.67,
+    "burn_card": true
+  },
+  "practice_modes": {
+    "auto_deal": false,
+    "auto_deal_delay": 2.0,
+    "show_hints_default": false,
+    "show_count_default": true,
+    "show_true_count": true,
+    "show_running_count": true,
+    "show_ev": true,
+    "show_strategy_feedback": true,
+    "warn_on_mistakes": true
+  },
+  "display_prefs": {
+    "card_style": "text",
+    "table_color": "#0a5c2e",
+    "show_probabilities": false,
+    "show_dealer_hole_card": false,
+    "animation_speed": 0.5,
+    "sound_enabled": false
+  },
+  "counting_system": {
+    "system": "hi-lo",
+    "show_deck_estimation": true,
+    "true_count_precision": 1
+  }
+}

@@ -2,6 +2,7 @@
 
 from typing import Optional, Dict, Tuple, List
 from game_engine import Hand, Card
+from settings import settings
 
 # Basic Strategy Actions
 HIT = 'H'
